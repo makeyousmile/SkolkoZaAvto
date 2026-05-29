@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>СколькоЗаАвто — Моментальная оценка авто по фото и видео</title>
+  
+  <!-- SEO Meta Tags -->
+  <meta name="description" content="Загрузите фото и короткое видео вашего автомобиля и получите точную оценку рыночной стоимости от нашего специалиста в течение нескольких минут без заполнения длинных форм.">
+  <meta name="theme-color" content="#080c14">
+  
+  <!-- CSS Link -->
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- Web App/PWA Manifest -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-container">
+        <div class="logo-icon">🚗</div>
+        <div class="logo-text">СколькоЗаАвто</div>
+      </div>
+      <p class="app-subtitle">Быстрая оценка стоимости по фото и видео</p>
+    </header>
+
+    <!-- Main Workspace -->
+    <main>
+      
+      <!-- STEP 1: Upload Form -->
+      <section id="form-section" class="glass-card">
+        
+        <!-- Photo Upload -->
+        <div class="upload-wrapper">
+          <label class="upload-label">
+            <span>📸 Фотографии автомобиля</span>
+          </label>
+          <div class="upload-zone" id="photo-zone">
+            <span class="upload-icon">📸</span>
+            <span class="upload-text">Перетащите <strong>фотографии</strong> сюда или нажмите для выбора</span>
+            <span class="upload-tip">Допускается до 10 фотографий (кузов, салон, повреждения)</span>
+            <input type="file" id="photo-input" class="file-input" accept="image/*" multiple>
+          </div>
+          <div class="preview-container" id="photo-previews"></div>
+        </div>
+
+        <!-- Video Upload -->
+        <div class="upload-wrapper">
+          <label class="upload-label">
+            <span>🎥 Видео автомобиля</span>
+          </label>
+          <div class="upload-zone" id="video-zone">
+            <span class="upload-icon">🎥</span>
+            <span class="upload-text">Перетащите <strong>видеоролик</strong> сюда или нажмите для выбора</span>
+            <span class="upload-tip">Короткое видео вокруг машины (до 100 МБ)</span>
+            <input type="file" id="video-input" class="file-input" accept="video/*">
+          </div>
+          <div class="preview-container" id="video-previews"></div>
+        </div>
+
+        <!-- Contact details -->
+        <div class="input-group">
+          <label class="upload-label" for="phone-input">
+            <span>📞 Как с вами связаться?</span>
+          </label>
+          <div class="text-input-wrapper">
+            <input type="text" id="phone-input" class="text-input" placeholder="Телефон или Telegram (например, @username)" required>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button id="submit-btn" class="btn-primary" disabled>
+          <span>Получить оценку</span> 🚀
+        </button>
+
+      </section>
+
+      <!-- STEP 2: File Uploading Screen (Hidden by default) -->
+      <section id="uploading-section" class="glass-card hidden">
+        <div class="uploading-screen">
+          <div class="spinner-wrapper">
+            <div class="spinner"></div>
+            <div class="spinner-pulse"></div>
+          </div>
+          <h2>Загрузка материалов...</h2>
+          <p class="app-subtitle" id="upload-status-text">Передача файлов на сервер оценки</p>
+          
+          <div class="progress-bar-container">
+            <div id="progress-bar" class="progress-bar-fill"></div>
+          </div>
+          <span class="progress-text" id="progress-percent">0%</span>
+        </div>
+      </section>
+
+      <!-- STEP 3: Waiting for Specialist (Hidden by default) -->
+      <section id="waiting-section" class="glass-card hidden">
+        <div class="waiting-screen">
+          <div class="status-badge pending">Ожидает оценки</div>
+          
+          <div class="spinner-wrapper">
+            <div class="spinner"></div>
+            <div class="spinner-pulse"></div>
+          </div>
+          
+          <h2>Оценка в процессе</h2>
+          <p class="app-subtitle" style="margin-bottom: 1.5rem;">
+            Наш специалист уже изучает присланные фото и видео. Пожалуйста, не закрывайте эту страницу.
+          </p>
+
+          <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem;" id="waiting-timer">
+            Прошло времени: <strong id="timer-seconds">0</strong> сек.
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);">
+            ID заявки: <span id="request-id-display" style="font-family: monospace;">-</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- STEP 4: Valuation Results (Hidden by default) -->
+      <section id="result-section" class="glass-card hidden">
+        <div class="result-screen">
+          <div class="status-badge completed">Оценка завершена</div>
+          
+          <h2>Приблизительная стоимость</h2>
+          <p class="app-subtitle">Оценка подготовлена профессиональным оценщиком</p>
+
+          <div class="price-display">
+            <div class="price-range" id="price-range-display">1 200 000 - 1 350 000 ₽</div>
+            <div class="price-label">Рыночный диапазон</div>
+          </div>
+
+          <div class="specialist-comment">
+            <div class="specialist-comment-title">
+              <span>💬 Заключение специалиста:</span>
+            </div>
+            <p id="specialist-comment-display">Загрузка комментария...</p>
+          </div>
+
+          <button id="reset-btn" class="btn-primary" style="margin-top: 2rem; background: var(--bg-secondary); border: 1px solid var(--border-glass); box-shadow: none;">
+            <span>Оценить другой автомобиль</span> 🔄
+          </button>
+        </div>
+      </section>
+
+    </main>
+
+  </div>
+
+  <!-- Main JavaScript File -->
+  <script src="app.js"></script>
+</body>
+</html>
