@@ -1,4 +1,4 @@
-const CACHE_NAME = 'skolko-za-avto-v1';
+const CACHE_NAME = 'skolko-za-avto-v3';
 const ASSETS = [
   '/',
   '/index.html',

@@ -16,13 +16,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const videoPreviews = document.getElementById('video-previews');
 
   const phoneInput = document.getElementById('phone-input');
+  const regionSelect = document.getElementById('region-select');
+  const geoStatus = document.getElementById('geo-status');
   const submitBtn = document.getElementById('submit-btn');
 
   const progressBar = document.getElementById('progress-bar');
   const progressPercent = document.getElementById('progress-percent');
   const uploadStatusText = document.getElementById('upload-status-text');
 
-  const timerSeconds = document.getElementById('timer-seconds');
   const requestIdDisplay = document.getElementById('request-id-display');
 
   const priceRangeDisplay = document.getElementById('price-range-display');
@@ -33,7 +34,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let photoFiles = [];
   let videoFile = null;
   let pollInterval = null;
-  let timerInterval = null;
   let uploadStartTime = 0;
 
   // Base API configuration (handles local dev and native wraps automatically)
@@ -187,12 +187,84 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   phoneInput.addEventListener('input', validateForm);
+  regionSelect.addEventListener('change', validateForm);
 
   function validateForm() {
     const hasMedia = photoFiles.length > 0 || videoFile !== null;
     const hasPhone = phoneInput.value.trim().length >= 2;
-    submitBtn.disabled = !(hasMedia && hasPhone);
+    const hasRegion = regionSelect.value !== "";
+    submitBtn.disabled = !(hasMedia && hasPhone && hasRegion);
   }
+
+  // === GEOLOCATION DETECTION ===
+  function detectRegion() {
+    if (!navigator.geolocation) {
+      console.log("Geolocation is not supported by this browser.");
+      return;
+    }
+
+    geoStatus.innerText = "Определяем... 🛰️";
+    
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+
+        // Fetch reverse geocoding from OSM Nominatim (free and requires no API key)
+        fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=ru`)
+          .then(res => res.json())
+          .then(data => {
+            if (data && data.address) {
+              const state = data.address.state || data.address.region || data.address.county || "";
+              console.log("Detected location state:", state);
+              
+              // Match Belarus regions
+              const regions = [
+                "Минская область",
+                "Могилёвская область",
+                "Брестская область",
+                "Витебская область",
+                "Гомельская область",
+                "Гродненская область"
+              ];
+              
+              const matchedRegion = regions.find(r => state.toLowerCase().includes(r.split(" ")[0].toLowerCase()));
+              
+              if (matchedRegion) {
+                regionSelect.value = matchedRegion;
+                geoStatus.innerText = "Определено автоматически 📍";
+                geoStatus.style.color = "var(--accent-cyan)";
+                validateForm();
+              } else {
+                geoStatus.innerText = "Выберите область вручную 📍";
+                geoStatus.style.color = "var(--text-secondary)";
+              }
+            } else {
+              geoStatus.innerText = "Выберите область вручную 📍";
+              geoStatus.style.color = "var(--text-secondary)";
+            }
+          })
+          .catch(err => {
+            console.error("Nominatim geocoding error:", err);
+            geoStatus.innerText = "Выберите область вручную 📍";
+            geoStatus.style.color = "var(--text-secondary)";
+          });
+      },
+      (error) => {
+        console.warn("Geolocation permission or hardware error:", error);
+        geoStatus.innerText = "Выберите область вручную 📍";
+        geoStatus.style.color = "var(--text-secondary)";
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: 6000,
+        maximumAge: 600000
+      }
+    );
+  }
+
+  // Trigger geolocation detection immediately
+  detectRegion();
 
   // === SUBMISSION & PROGRESS ===
 
@@ -205,6 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const formData = new FormData();
     formData.append('phone', phoneInput.value.trim());
+    formData.append('region', regionSelect.value);
     
     photoFiles.forEach((file) => {
       formData.append('photos', file);
@@ -259,15 +332,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     requestIdDisplay.innerText = requestId;
 
-    // Timer logic
-    let seconds = 0;
-    timerSeconds.innerText = seconds;
-    clearInterval(timerInterval);
-    timerInterval = setInterval(() => {
-      seconds++;
-      timerSeconds.innerText = seconds;
-    }, 1000);
-
     // Polling logic
     clearInterval(pollInterval);
     pollInterval = setInterval(() => {
@@ -283,7 +347,6 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(data => {
           if (data && data.status === 'completed') {
             clearInterval(pollInterval);
-            clearInterval(timerInterval);
             showResult(data);
           }
         })
@@ -297,8 +360,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const formattedMin = new Intl.NumberFormat('ru-RU').format(data.min_price);
     const formattedMax = new Intl.NumberFormat('ru-RU').format(data.max_price);
-
-    priceRangeDisplay.innerText = `${formattedMin} - ${formattedMax} ₽`;
+    
+    const curSymbol = data.currency || 'BYN';
+    if (curSymbol === '$') {
+      priceRangeDisplay.innerText = `$ ${formattedMin} - ${formattedMax}`;
+    } else {
+      priceRangeDisplay.innerText = `${formattedMin} - ${formattedMax} BYN`;
+    }
     specialistCommentDisplay.innerText = data.comment || "Без комментариев специалиста.";
   }
 
@@ -311,12 +379,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function resetToForm() {
     clearInterval(pollInterval);
-    clearInterval(timerInterval);
     
     // Clear State
     photoFiles = [];
     videoFile = null;
     phoneInput.value = '';
+    regionSelect.value = '';
+    geoStatus.innerText = '';
+    detectRegion(); // Redetect on reset
     progressBar.style.width = '0%';
     progressPercent.innerText = '0%';
     uploadStatusText.innerText = "Передача файлов на сервер оценки";

@@ -63,6 +63,26 @@
           <div class="preview-container" id="video-previews"></div>
         </div>
 
+        <!-- Region details -->
+        <div class="input-group">
+          <label class="upload-label" for="region-select" style="display: flex; align-items: center; width: 100%;">
+            <span>📍 Область нахождения авто</span>
+            <span id="geo-status" style="font-size: 0.75rem; color: var(--accent-cyan); font-weight: normal; margin-left: auto;"></span>
+          </label>
+          <div class="text-input-wrapper" style="position: relative;">
+            <select id="region-select" class="text-input" style="appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 2.5rem; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-glass);" required>
+              <option value="" disabled selected hidden>Выберите область...</option>
+              <option value="Минская область">Минская область</option>
+              <option value="Могилёвская область">Могилёвская область</option>
+              <option value="Брестская область">Брестская область</option>
+              <option value="Витебская область">Витебская область</option>
+              <option value="Гомельская область">Гомельская область</option>
+              <option value="Гродненская область">Гродненская область</option>
+            </select>
+            <div style="position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-secondary); font-size: 0.8rem;">▼</div>
+          </div>
+        </div>
+
         <!-- Contact details -->
         <div class="input-group">
           <label class="upload-label" for="phone-input">
@@ -112,8 +132,8 @@
             Наш специалист уже изучает присланные фото и видео. Пожалуйста, не закрывайте эту страницу.
           </p>
 
-          <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem;" id="waiting-timer">
-            Прошло времени: <strong id="timer-seconds">0</strong> сек.
+          <div class="waiting-notice" style="font-size: 0.85rem; color: var(--text-secondary); max-width: 340px; margin: 0 auto 1.5rem; line-height: 1.45; border-top: 1px solid var(--border-glass); padding-top: 1.25rem;">
+            🤝 <strong>Ручная экспертиза:</strong> расчёт стоимости выполняет не шаблонный робот или авто-алгоритм, а реальный, опытный оценщик. Мы тщательно изучаем состояние кузова, салона и комплектацию по вашим фото и видео, чтобы дать максимально объективный и справедливый рыночный диапазон.
           </div>
           <div style="font-size: 0.8rem; color: var(--text-muted);">
             ID заявки: <span id="request-id-display" style="font-family: monospace;">-</span>
@@ -130,7 +150,7 @@
           <p class="app-subtitle">Оценка подготовлена профессиональным оценщиком</p>
 
           <div class="price-display">
-            <div class="price-range" id="price-range-display">1 200 000 - 1 350 000 ₽</div>
+            <div class="price-range" id="price-range-display">45 000 - 50 000 BYN</div>
             <div class="price-label">Рыночный диапазон</div>
           </div>
 

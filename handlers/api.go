@@ -29,6 +29,8 @@ type CarRequest struct {
 	Status      RequestStatus `json:"status"` // pending / completed
 	MinPrice    float64       `json:"min_price"`
 	MaxPrice    float64       `json:"max_price"`
+	Currency    string        `json:"currency"` // BYN / $
+	Region      string        `json:"region"`   // Минская область, etc.
 	Comment     string        `json:"comment"`
 	CreatedAt   time.Time     `json:"created_at"`
 	EstimatedAt *time.Time    `json:"estimated_at,omitempty"`
@@ -239,10 +241,34 @@ func (h *APIHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	phone := r.FormValue("phone")
-	if strings.TrimSpace(phone) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Phone number or Telegram username is required"})
+	phone := strings.TrimSpace(r.FormValue("phone"))
+	if phone == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Пожалуйста, укажите телефон или Telegram"})
 		return
+	}
+
+	region := strings.TrimSpace(r.FormValue("region"))
+	if region == "" {
+		region = "Не указана"
+	}
+
+	// Если пользователь ввел Telegram-аккаунт (начинается с @)
+	if strings.HasPrefix(phone, "@") {
+		username := strings.TrimPrefix(phone, "@")
+		if len(username) < 5 || len(username) > 32 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Некорректная длина Telegram-аккаунта (от 5 до 32 символов)"})
+			return
+		}
+
+		// Выполняем быструю проверку существования аккаунта
+		exists, err := checkTelegramUsernameExists(username)
+		if err != nil {
+			// Логируем ошибку сети/таймаута, но разрешаем отправку (чтобы не блокировать пользователей в случае сетевых проблем)
+			log.Printf("Warning: failed to check Telegram username existence for %s: %v. Bypassing check.", username, err)
+		} else if !exists {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Указанный Telegram-аккаунт не найден. Проверьте правильность ввода."})
+			return
+		}
 	}
 
 	reqID := generateID()
@@ -331,6 +357,8 @@ func (h *APIHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		Photos:    photoPaths,
 		Video:     videoPath,
 		Status:    StatusPending,
+		Currency:  "BYN", // default until estimated
+		Region:    region,
 		CreatedAt: time.Now(),
 	}
 
@@ -397,8 +425,13 @@ func (h *APIHandler) HandleGetAdminRequests(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, result)
 }
 
-// POST /api/admin/requests/:id/estimate
+// POST /api/admin/requests/:id/estimate or DELETE /api/admin/requests/:id
 func (h *APIHandler) HandlePostEstimate(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		h.HandleDeleteRequest(w, r)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -415,6 +448,7 @@ func (h *APIHandler) HandlePostEstimate(w http.ResponseWriter, r *http.Request) 
 	var body struct {
 		MinPrice float64 `json:"min_price"`
 		MaxPrice float64 `json:"max_price"`
+		Currency string  `json:"currency"`
 		Comment  string  `json:"comment"`
 	}
 
@@ -437,6 +471,10 @@ func (h *APIHandler) HandlePostEstimate(w http.ResponseWriter, r *http.Request) 
 	req.Status = StatusCompleted
 	req.MinPrice = body.MinPrice
 	req.MaxPrice = body.MaxPrice
+	req.Currency = body.Currency
+	if req.Currency == "" {
+		req.Currency = "BYN"
+	}
 	req.Comment = body.Comment
 	req.EstimatedAt = &now
 
@@ -445,4 +483,76 @@ func (h *APIHandler) HandlePostEstimate(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, req)
+}
+
+// DELETE /api/admin/requests/:id
+func (h *APIHandler) HandleDeleteRequest(w http.ResponseWriter, r *http.Request) {
+	// Extract ID from path: /api/admin/requests/{id}
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request URL"})
+		return
+	}
+	id := parts[4]
+
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+
+	_, exists := h.db.Requests[id]
+	if !exists {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Request not found"})
+		return
+	}
+
+	// Delete uploads directory for this request
+	reqDir := filepath.Join(h.uploadsDir, id)
+	if err := os.RemoveAll(reqDir); err != nil {
+		log.Printf("Warning: failed to delete upload directory %s: %v", reqDir, err)
+	}
+
+	delete(h.db.Requests, id)
+
+	if err := h.db.save(); err != nil {
+		log.Printf("Error saving database after delete: %v", err)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Request deleted successfully"})
+}
+
+// Вспомогательная функция для быстрой проверки существования публичного аккаунта Telegram
+func checkTelegramUsernameExists(username string) (bool, error) {
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+	}
+
+	resp, err := client.Get("https://t.me/" + username)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, nil
+	}
+
+	// Читаем первые 100 КБ ответа (этого более чем достаточно для мета-тегов)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1024*100))
+	if err != nil {
+		return false, err
+	}
+
+	bodyStr := string(bodyBytes)
+
+	// Запрет индексации поисковиками - главный признак несуществующего профиля на t.me
+	if strings.Contains(bodyStr, "noindex, nofollow") {
+		return false, nil
+	}
+
+	// Сравниваем со стандартным заголовком заглушки
+	fallbackTitle := fmt.Sprintf(`content="Telegram: Contact @%s"`, username)
+	if strings.Contains(bodyStr, fallbackTitle) {
+		return false, nil
+	}
+
+	return true, nil
 }

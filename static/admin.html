@@ -92,6 +92,7 @@
                 <div id="detail-status" class="status-badge pending">Ожидает</div>
               </div>
               <p class="app-subtitle">Создана: <span id="detail-time">-</span></p>
+              <p class="app-subtitle" style="margin-top: 0.25rem;">📍 Область: <strong id="detail-region" style="color: var(--text-primary);">-</strong></p>
             </div>
             
             <!-- Contact Card -->
@@ -123,15 +124,24 @@
             <h3 style="font-family: var(--font-display); font-size: 1.25rem; margin-bottom: 1.25rem; color: #ff007f;">🛠️ Расчет стоимости автомобиля</h3>
             
             <form id="estimate-form">
+              <!-- Currency selector -->
+              <div class="input-group" style="margin-bottom: 1.25rem;">
+                <label class="upload-label">Валюта оценки</label>
+                <div class="currency-selector" id="admin-currency-selector">
+                  <button type="button" class="currency-btn active" data-currency="BYN">BYN</button>
+                  <button type="button" class="currency-btn" data-currency="$">$ USD</button>
+                </div>
+              </div>
+
               <!-- Price Fields -->
               <div class="price-input-row">
                 <div class="input-group" style="margin-bottom: 0;">
-                  <label class="upload-label" for="est-min-price">Минимальная цена (₽)</label>
-                  <input type="number" id="est-min-price" class="text-input" placeholder="Например: 1200000" min="0" required>
+                  <label class="upload-label" for="est-min-price">Минимальная цена (<span class="currency-symbol">BYN</span>)</label>
+                  <input type="number" id="est-min-price" class="text-input" placeholder="Например: 45000" min="0" required>
                 </div>
                 <div class="input-group" style="margin-bottom: 0;">
-                  <label class="upload-label" for="est-max-price">Максимальная цена (₽)</label>
-                  <input type="number" id="est-max-price" class="text-input" placeholder="Например: 1350000" min="0" required>
+                  <label class="upload-label" for="est-max-price">Максимальная цена (<span class="currency-symbol">BYN</span>)</label>
+                  <input type="number" id="est-max-price" class="text-input" placeholder="Например: 50000" min="0" required>
                 </div>
               </div>
 
@@ -144,6 +154,11 @@
               <!-- Action buttons -->
               <button type="submit" id="estimate-submit-btn" class="btn-primary" style="background: linear-gradient(135deg, #ff007f 0%, #7f00ff 100%); box-shadow: 0 0 20px rgba(255, 0, 127, 0.25);">
                 <span>Подтвердить и отправить оценку</span> ✅
+              </button>
+
+              <!-- Delete Button -->
+              <button type="button" id="delete-request-btn" class="btn-primary hidden" style="margin-top: 1rem; background: var(--danger); box-shadow: none;">
+                <span>Удалить эту заявку</span> 🗑️
               </button>
             </form>
           </div>

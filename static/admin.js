@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const detailStatus = document.getElementById('detail-status');
   const detailTime = document.getElementById('detail-time');
   const detailPhone = document.getElementById('detail-phone');
+  const detailRegion = document.getElementById('detail-region');
   
   const detailVideoPlayer = document.getElementById('detail-video-player');
   const detailVideoEmpty = document.getElementById('detail-video-empty');
@@ -31,6 +32,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const estMaxPrice = document.getElementById('est-max-price');
   const estComment = document.getElementById('est-comment');
   const estimateSubmitBtn = document.getElementById('estimate-submit-btn');
+  const deleteRequestBtn = document.getElementById('delete-request-btn');
+
+  // Currency Selection Elements
+  const currencySelector = document.getElementById('admin-currency-selector');
+  const currencyButtons = document.querySelectorAll('#admin-currency-selector .currency-btn');
+  const currencySymbols = document.querySelectorAll('.currency-symbol');
+  let selectedCurrency = 'BYN';
 
   const photoModal = document.getElementById('photo-modal');
   const modalImg = document.getElementById('modal-img');
@@ -50,6 +58,41 @@ document.addEventListener('DOMContentLoaded', () => {
   let selectedId = null;
   let activeTab = 'pending'; // pending / completed
   let pollInterval = null;
+
+  // === CURRENCY SELECTION LOGIC ===
+  currencyButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      // If form is disabled (e.g. estimated), do not allow currency change
+      if (estMinPrice.disabled) return;
+
+      selectedCurrency = btn.getAttribute('data-currency');
+      updateCurrencyUI(selectedCurrency);
+    });
+  });
+
+  function updateCurrencyUI(currency) {
+    currencyButtons.forEach(b => {
+      if (b.getAttribute('data-currency') === currency) {
+        b.classList.add('active');
+      } else {
+        b.classList.remove('active');
+      }
+    });
+
+    // Update symbols in input labels
+    currencySymbols.forEach(span => {
+      span.innerText = currency;
+    });
+
+    // Update placeholders for a premium experience
+    if (currency === 'BYN') {
+      estMinPrice.placeholder = 'Например: 45000';
+      estMaxPrice.placeholder = 'Например: 50000';
+    } else {
+      estMinPrice.placeholder = 'Например: 15000';
+      estMaxPrice.placeholder = 'Например: 18000';
+    }
+  }
 
   // === AUTHENTICATION LOGIC ===
 
@@ -212,6 +255,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const photosCount = req.photos ? req.photos.length : 0;
       const hasVideo = req.video ? '🎥 Видео' : 'Нет видео';
 
+      let priceLine = '';
+      if (activeTab === 'completed') {
+        const formattedMin = new Intl.NumberFormat('ru-RU').format(req.min_price);
+        const formattedMax = new Intl.NumberFormat('ru-RU').format(req.max_price);
+        const curSymbol = req.currency || 'BYN';
+        priceLine = `<div class="request-card-price" style="font-weight: 700; color: var(--accent-cyan); font-size: 0.85rem; margin-top: 0.35rem;">${formattedMin} - ${formattedMax} ${curSymbol}</div>`;
+      }
+
       card.innerHTML = `
         <div class="request-card-header">
           <span class="request-card-id">ID: ${req.id}</span>
@@ -222,6 +273,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <span>🖼️ ${photosCount} фото</span>
           <span>${hasVideo}</span>
         </div>
+        ${priceLine}
       `;
 
       card.addEventListener('click', () => {
@@ -271,6 +323,9 @@ document.addEventListener('DOMContentLoaded', () => {
       minute: '2-digit'
     });
     detailTime.innerText = fullDateStr;
+
+    // Region
+    detailRegion.innerText = req.region || 'Не указана';
 
     // Client Contacts & Formatting
     detailPhone.innerText = req.phone;
@@ -332,6 +387,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Form population & lock
     if (req.status === 'completed') {
       // Already Estimated
+      selectedCurrency = req.currency || 'BYN';
+      updateCurrencyUI(selectedCurrency);
+
       if (forceResetInputs) {
         estMinPrice.value = req.min_price;
         estMaxPrice.value = req.max_price;
@@ -346,9 +404,14 @@ document.addEventListener('DOMContentLoaded', () => {
       estimateSubmitBtn.innerHTML = `<span>Автомобиль успешно оценен</span> `;
       estimateSubmitBtn.style.background = 'var(--success)';
       estimateSubmitBtn.style.boxShadow = 'none';
+      
+      // Show delete button for completed request
+      deleteRequestBtn.classList.remove('hidden');
     } else {
       // Pending valuation
       if (forceResetInputs) {
+        selectedCurrency = 'BYN';
+        updateCurrencyUI(selectedCurrency);
         estMinPrice.value = '';
         estMaxPrice.value = '';
         estComment.value = '';
@@ -362,6 +425,9 @@ document.addEventListener('DOMContentLoaded', () => {
       estimateSubmitBtn.innerHTML = `<span>Подтвердить и отправить оценку</span> ✅`;
       estimateSubmitBtn.style.background = 'linear-gradient(135deg, #ff007f 0%, #7f00ff 100%)';
       estimateSubmitBtn.style.boxShadow = '0 0 20px rgba(255, 0, 127, 0.25)';
+      
+      // Hide delete button for pending request
+      deleteRequestBtn.classList.add('hidden');
     }
   }
 
@@ -391,6 +457,7 @@ document.addEventListener('DOMContentLoaded', () => {
       body: JSON.stringify({
         min_price: min,
         max_price: max,
+        currency: selectedCurrency,
         comment: comment
       })
     })
@@ -427,6 +494,59 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
+  });
+
+  // === DELETE REQUEST ===
+  deleteRequestBtn.addEventListener('click', () => {
+    if (!selectedId) return;
+
+    const currentReq = requests.find(r => r.id === selectedId);
+    if (!currentReq) return;
+
+    if (!confirm(`Вы действительно хотите безвозвратно удалить заявку ID: ${selectedId}? Все загруженные фотографии и видео этого автомобиля будут навсегда стерты с сервера.`)) {
+      return;
+    }
+
+    deleteRequestBtn.disabled = true;
+    deleteRequestBtn.innerText = 'Удаление...';
+
+    fetch(`${API_BASE}/api/admin/requests/${selectedId}`, {
+      method: 'DELETE'
+    })
+      .then(res => {
+        if (res.status === 401) {
+          showLoginScreen();
+          throw new Error("Unauthorized");
+        }
+        if (res.status !== 200) {
+          throw new Error("Failed to delete request");
+        }
+        return res.json();
+      })
+      .then(() => {
+        // Remove from local list
+        requests = requests.filter(r => r.id !== selectedId);
+        
+        updateTabCounts();
+        renderRequests();
+
+        // Reset workspace to empty state
+        selectedId = null;
+        workspaceDetails.classList.add('hidden');
+        workspaceEmpty.classList.remove('hidden');
+
+        alert("Заявка успешно удалена!");
+      })
+      .catch(err => {
+        if (err.message !== "Unauthorized") {
+          console.error("Ошибка при удалении заявки:", err);
+          alert("Не удалось удалить заявку. Попробуйте еще раз.");
+        }
+      })
+      .finally(() => {
+        deleteRequestBtn.disabled = false;
+        deleteRequestBtn.innerHTML = `<span>Удалить эту заявку</span> 🗑️`;
+      });
   });
 
   // === LIGHTBOX MODAL ===

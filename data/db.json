@@ -1,4 +1,48 @@
 {
+  "345ca58d37d9528e": {
+    "id": "345ca58d37d9528e",
+    "phone": "aloha",
+    "photos": [
+      "/uploads/345ca58d37d9528e/photo_1.jpg"
+    ],
+    "video": "",
+    "status": "completed",
+    "min_price": 15,
+    "max_price": 145,
+    "comment": "1345",
+    "created_at": "2026-06-01T10:41:08.235611018Z",
+    "estimated_at": "2026-06-01T13:04:24.15697885Z"
+  },
+  "700bc1e134eacc6a": {
+    "id": "700bc1e134eacc6a",
+    "phone": "aloha",
+    "photos": [
+      "/uploads/700bc1e134eacc6a/photo_1.png"
+    ],
+    "video": "",
+    "status": "completed",
+    "min_price": 5000,
+    "max_price": 5500,
+    "comment": "топ",
+    "created_at": "2026-06-01T10:05:22.58919579Z",
+    "estimated_at": "2026-06-01T10:13:33.849435581Z"
+  },
+  "9223f0286b8be824": {
+    "id": "9223f0286b8be824",
+    "phone": "+375445555980",
+    "photos": [
+      "/uploads/9223f0286b8be824/photo_1.png",
+      "/uploads/9223f0286b8be824/photo_2.png",
+      "/uploads/9223f0286b8be824/photo_3.png"
+    ],
+    "video": "/uploads/9223f0286b8be824/video.mov",
+    "status": "completed",
+    "min_price": 1000000,
+    "max_price": 1000000,
+    "comment": "Норм ракета! Выкупим сегодня!",
+    "created_at": "2026-06-01T07:53:53.508962692Z",
+    "estimated_at": "2026-06-01T07:58:24.856022048Z"
+  },
   "952a30bcff6133f0": {
     "id": "952a30bcff6133f0",
     "phone": "+375296668485",
