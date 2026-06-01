@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: skolkozaavto-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist database and client upload folders
+      - app-data:/app/data
+      - app-uploads:/app/uploads
+    environment:
+      - PORT=8080
+      - TZ=Europe/Minsk
+
+volumes:
+  app-data:
+    driver: local
+  app-uploads:
+    driver: local
