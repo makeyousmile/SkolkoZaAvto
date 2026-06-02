@@ -40,8 +40,8 @@ services:
       - DOCKER_ENABLED=true # Enable auto-routing based on Docker labels
       - SSL_DIR=/srv/ssl    # Store certs in /srv/ssl
       
-      # LOCAL DEVELOPMENT MODE (Self-signed SSL for localhost/local IPs)
-      - SSL_TYPE=self
+      # LOCAL DEVELOPMENT MODE (No SSL)
+      - SSL_TYPE=none
       
       # PRODUCTION MODE (Uncomment these when deploying to production with a real domain)
       # - SSL_TYPE=auto
