@@ -8,7 +8,9 @@ services:
     container_name: skolkozaavto-app
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8080:8080" # Direct HTTP access on port 8080
+    expose:
+      - "8080"
     volumes:
       # Persist database and client upload folders
       - app-data:/app/data
@@ -16,6 +18,36 @@ services:
     environment:
       - PORT=8080
       - TZ=Europe/Minsk
+    labels:
+      # Reproxy Docker auto-discovery labels
+      - "reproxy.server=*" # Accepts any domain (localhost, local IP, etc.) for flexible local testing
+      - "reproxy.route=/"
+      - "reproxy.port=8080"
+
+  reproxy:
+    image: umputun/reproxy:latest
+    container_name: skolkozaavto-reproxy
+    restart: unless-stopped
+    ports:
+      - "80:80"   # HTTP port (for ACME challenge / redirect)
+      - "443:443" # HTTPS port (secure context for Geolocation and Service Workers)
+    volumes:
+      # Mount Docker socket so Reproxy can read container labels
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist SSL certificates
+      - ./ssl:/srv/reproxy/ssl
+    environment:
+      - DOCKER_ENABLED=true # Enable auto-routing based on Docker labels
+      
+      # LOCAL DEVELOPMENT MODE (Self-signed SSL for localhost/local IPs)
+      - SSL_TYPE=self
+      
+      # PRODUCTION MODE (Uncomment these when deploying to production with a real domain)
+      # - SSL_TYPE=auto
+      # - SSL_ACME_EMAIL=your-email@example.com
+      # - SSL_ACME_FQDN=yourdomain.by
+    depends_on:
+      - app
 
 volumes:
   app-data:
