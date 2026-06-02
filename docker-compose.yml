@@ -35,9 +35,10 @@ services:
       # Mount Docker socket so Reproxy can read container labels
       - /var/run/docker.sock:/var/run/docker.sock
       # Persist SSL certificates
-      - ./ssl:/srv/reproxy/ssl
+      - ./ssl:/srv/ssl
     environment:
       - DOCKER_ENABLED=true # Enable auto-routing based on Docker labels
+      - SSL_DIR=/srv/ssl    # Store certs in /srv/ssl
       
       # LOCAL DEVELOPMENT MODE (Self-signed SSL for localhost/local IPs)
       - SSL_TYPE=self
