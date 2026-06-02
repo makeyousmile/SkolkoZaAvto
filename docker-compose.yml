@@ -37,8 +37,9 @@ services:
       # Persist SSL certificates
       - ./ssl:/srv/ssl
     environment:
-      - DOCKER_ENABLED=true # Enable auto-routing based on Docker labels
-      - SSL_DIR=/srv/ssl    # Store certs in /srv/ssl
+      - DOCKER_ENABLED=true      # Enable auto-routing based on Docker labels
+      - DOCKER_API_VERSION=1.40  # Set Docker client API version to match the host daemon
+      - SSL_DIR=/srv/ssl         # Store certs in /srv/ssl
       
       # LOCAL DEVELOPMENT MODE (No SSL)
       - SSL_TYPE=none
