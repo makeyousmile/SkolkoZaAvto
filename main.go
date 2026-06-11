@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -9,8 +10,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"skolkozaavto/handlers"
+	"syscall"
+	"time"
 )
 
 func main() {
@@ -61,16 +65,42 @@ func main() {
 	// Frontend static assets
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 
-	log.Printf("==================================================")
-	log.Printf("  SkolkoZaAvto Server started successfully!")
-	log.Printf("  Local URL:   http://localhost:%s", port)
-	log.Printf("  Admin Panel: http://localhost:%s/admin", port)
-	log.Printf("==================================================")
-
-	err = http.ListenAndServe(":"+port, nil)
-	if err != nil {
-		log.Fatalf("Server failed: %v", err)
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: nil,
 	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("==================================================")
+		log.Printf("  SkolkoZaAvto Server started successfully!")
+		log.Printf("  Local URL:   http://localhost:%s", port)
+		log.Printf("  Admin Panel: http://localhost:%s/admin", port)
+		log.Printf("==================================================")
+
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	<-stop
+	log.Printf("Shutting down server gracefully...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	// Close database connection cleanly
+	if err := db.Close(); err != nil {
+		log.Printf("Error closing database: %v", err)
+	}
+
+	log.Printf("Server stopped.")
 }
 
 // Generate PWA icons if they do not exist

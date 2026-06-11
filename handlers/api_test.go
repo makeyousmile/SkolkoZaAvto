@@ -135,6 +135,7 @@ func TestHandlePostEstimateAndGetStatus(t *testing.T) {
 	// Inject a pending request
 	carReq := &CarRequest{
 		ID:        "request-123",
+		Token:     "test-token-123",
 		Phone:     "+375445555980",
 		Region:    "Гродненская область",
 		Status:    StatusPending,
@@ -144,7 +145,7 @@ func TestHandlePostEstimateAndGetStatus(t *testing.T) {
 	db.save()
 
 	// 1. Check pending status via client API
-	reqStatus := httptest.NewRequest("GET", "/api/requests/request-123/status", nil)
+	reqStatus := httptest.NewRequest("GET", "/api/requests/request-123/status?token=test-token-123", nil)
 	wStatus := httptest.NewRecorder()
 	h.HandleGetStatus(wStatus, reqStatus)
 

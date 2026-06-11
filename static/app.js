@@ -308,8 +308,8 @@ document.addEventListener('DOMContentLoaded', () => {
     xhr.onload = function() {
       if (xhr.status === 201) {
         const response = JSON.parse(xhr.responseText);
-        saveSession(response.id);
-        startWaitingState(response.id);
+        saveSession(response.id, response.token);
+        startWaitingState(response.id, response.token);
       } else {
         alert('Ошибка при загрузке файлов. Попробуйте еще раз. Код: ' + xhr.status);
         resetToForm();
@@ -326,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // === WAITING STATE & POLLING ===
 
-  function startWaitingState(requestId) {
+  function startWaitingState(requestId, token) {
     uploadingSection.classList.add('hidden');
     waitingSection.classList.remove('hidden');
     
@@ -335,7 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Polling logic
     clearInterval(pollInterval);
     pollInterval = setInterval(() => {
-      fetch(`${API_BASE}/api/requests/${requestId}/status`)
+      fetch(`${API_BASE}/api/requests/${requestId}/status?token=${token}`)
         .then(res => {
           if (res.status === 404) {
             // Request got cleared/not found
@@ -402,26 +402,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // === SESSION STORAGE MANAGEMENT ===
 
-  function saveSession(requestId) {
+  function saveSession(requestId, token) {
     localStorage.setItem('skolko_za_avto_id', requestId);
+    localStorage.setItem('skolko_za_avto_token', token);
   }
 
   function clearSession() {
     localStorage.removeItem('skolko_za_avto_id');
+    localStorage.removeItem('skolko_za_avto_token');
   }
 
   function checkSavedSession() {
     const savedId = localStorage.getItem('skolko_za_avto_id');
-    if (savedId) {
+    const savedToken = localStorage.getItem('skolko_za_avto_token');
+    if (savedId && savedToken) {
       // Restore state instantly, skip form
       formSection.classList.add('hidden');
       waitingSection.classList.remove('hidden');
       requestIdDisplay.innerText = savedId;
       
       // Fetch current database state for this request
-      fetch(`${API_BASE}/api/requests/${savedId}/status`)
+      fetch(`${API_BASE}/api/requests/${savedId}/status?token=${savedToken}`)
         .then(res => {
-          if (res.status === 404) {
+          if (res.status === 404 || res.status === 401) {
             clearSession();
             resetToForm();
             return null;
@@ -433,14 +436,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.status === 'completed') {
               showResult(data);
             } else {
-              startWaitingState(savedId);
+              startWaitingState(savedId, savedToken);
             }
           }
         })
         .catch(err => {
           console.error("Ошибка восстановления сессии:", err);
           // Try to poll anyway
-          startWaitingState(savedId);
+          startWaitingState(savedId, savedToken);
         });
     }
   }

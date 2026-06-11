@@ -1,5 +1,15 @@
 // SkolkoZaAvto Specialist/Admin Logic
 
+function escapeHTML(str) {
+  if (!str) return '';
+  return str.toString()
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // Base API configuration
   const API_BASE = window.location.origin.includes('localhost') || window.location.origin.startsWith('file://')
@@ -259,16 +269,16 @@ document.addEventListener('DOMContentLoaded', () => {
       if (activeTab === 'completed') {
         const formattedMin = new Intl.NumberFormat('ru-RU').format(req.min_price);
         const formattedMax = new Intl.NumberFormat('ru-RU').format(req.max_price);
-        const curSymbol = req.currency || 'BYN';
+        const curSymbol = escapeHTML(req.currency || 'BYN');
         priceLine = `<div class="request-card-price" style="font-weight: 700; color: var(--accent-cyan); font-size: 0.85rem; margin-top: 0.35rem;">${formattedMin} - ${formattedMax} ${curSymbol}</div>`;
       }
 
       card.innerHTML = `
         <div class="request-card-header">
-          <span class="request-card-id">ID: ${req.id}</span>
+          <span class="request-card-id">ID: ${escapeHTML(req.id)}</span>
           <span class="request-card-time">${timeStr}</span>
         </div>
-        <div class="request-card-phone">${req.phone}</div>
+        <div class="request-card-phone">${escapeHTML(req.phone)}</div>
         <div class="request-card-meta">
           <span>🖼️ ${photosCount} фото</span>
           <span>${hasVideo}</span>

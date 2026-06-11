@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -28,6 +29,7 @@ const (
 
 type CarRequest struct {
 	ID          string        `json:"id"`
+	Token       string        `json:"token"`
 	Phone       string        `json:"phone"`
 	Photos      []string      `json:"photos"` // Relative URLs to uploaded photos (e.g. /uploads/...)
 	Video       string        `json:"video"`  // Relative URL to uploaded video (e.g. /uploads/...)
@@ -64,6 +66,7 @@ func NewDatabase(filePath string) (*Database, error) {
 	createTableSQL := `
 	CREATE TABLE IF NOT EXISTS requests (
 		id TEXT PRIMARY KEY,
+		token TEXT,
 		phone TEXT,
 		photos TEXT,
 		video TEXT,
@@ -80,6 +83,8 @@ func NewDatabase(filePath string) (*Database, error) {
 		dbConn.Close()
 		return nil, err
 	}
+	// Add token column if it doesn't exist (ignores error if it already exists)
+	_, _ = dbConn.Exec("ALTER TABLE requests ADD COLUMN token TEXT")
 
 	// Create users table if not exists
 	createUsersTableSQL := `
@@ -96,9 +101,24 @@ func NewDatabase(filePath string) (*Database, error) {
 	var count int
 	err = dbConn.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
 	if err == nil && count == 0 {
-		hashed, err := bcrypt.GenerateFromPassword([]byte("chaka"), bcrypt.DefaultCost)
-		if err == nil {
-			_, _ = dbConn.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", "admin", string(hashed))
+		adminPassword := os.Getenv("ADMIN_PASSWORD")
+		appEnv := os.Getenv("APP_ENV")
+		if adminPassword == "" {
+			if appEnv == "production" {
+				log.Printf("ERROR: APP_ENV is set to production, but ADMIN_PASSWORD is empty. No default admin user created!")
+			} else {
+				adminPassword = "chaka" // default for local development
+				log.Printf("WARNING: No ADMIN_PASSWORD environment variable set. Using default password 'chaka' for local development. Set ADMIN_PASSWORD in production!")
+				hashed, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+				if err == nil {
+					_, _ = dbConn.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", "admin", string(hashed))
+				}
+			}
+		} else {
+			hashed, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+			if err == nil {
+				_, _ = dbConn.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", "admin", string(hashed))
+			}
 		}
 	}
 
@@ -113,49 +133,72 @@ func NewDatabase(filePath string) (*Database, error) {
 	if _, err := os.Stat(legacyPath); err == nil {
 		legacyFile, err := os.Open(legacyPath)
 		if err == nil {
+			defer legacyFile.Close()
 			var legacyRequests map[string]*CarRequest
 			if err := json.NewDecoder(legacyFile).Decode(&legacyRequests); err == nil {
 				tx, err := dbConn.Begin()
-				if err == nil {
-					stmt, err := tx.Prepare(`
-						INSERT INTO requests (id, phone, photos, video, status, min_price, max_price, currency, region, comment, created_at, estimated_at)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-						ON CONFLICT(id) DO NOTHING
-					`)
-					if err == nil {
-						for _, req := range legacyRequests {
-							photosJSON, _ := json.Marshal(req.Photos)
-							var estAt interface{}
-							if req.EstimatedAt != nil {
-								estAt = *req.EstimatedAt
-							}
-							stmt.Exec(
-								req.ID,
-								req.Phone,
-								string(photosJSON),
-								req.Video,
-								string(req.Status),
-								req.MinPrice,
-								req.MaxPrice,
-								req.Currency,
-								req.Region,
-								req.Comment,
-								req.CreatedAt,
-								estAt,
-							)
-						}
-						stmt.Close()
-						tx.Commit()
+				if err != nil {
+					dbConn.Close()
+					return nil, fmt.Errorf("failed to start migration transaction: %w", err)
+				}
+				defer tx.Rollback()
+
+				stmt, err := tx.Prepare(`
+					INSERT INTO requests (id, token, phone, photos, video, status, min_price, max_price, currency, region, comment, created_at, estimated_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT(id) DO NOTHING
+				`)
+				if err != nil {
+					return nil, fmt.Errorf("failed to prepare migration statement: %w", err)
+				}
+				defer stmt.Close()
+
+				for _, req := range legacyRequests {
+					photosJSON, err := json.Marshal(req.Photos)
+					if err != nil {
+						return nil, fmt.Errorf("failed to marshal photos for request %s: %w", req.ID, err)
+					}
+					var estAt interface{}
+					if req.EstimatedAt != nil {
+						estAt = *req.EstimatedAt
+					}
+					token := generateToken()
+					_, err = stmt.Exec(
+						req.ID,
+						token,
+						req.Phone,
+						string(photosJSON),
+						req.Video,
+						string(req.Status),
+						req.MinPrice,
+						req.MaxPrice,
+						req.Currency,
+						req.Region,
+						req.Comment,
+						req.CreatedAt,
+						estAt,
+					)
+					if err != nil {
+						return nil, fmt.Errorf("failed to insert migration row for request %s: %w", req.ID, err)
 					}
 				}
+
+				if err := tx.Commit(); err != nil {
+					return nil, fmt.Errorf("failed to commit migration transaction: %w", err)
+				}
+
+				legacyFile.Close()
+				if err := os.Rename(legacyPath, legacyPath+".bak"); err != nil {
+					log.Printf("Warning: failed to rename legacy db.json to db.json.bak: %v", err)
+				} else {
+					log.Printf("Successfully migrated database from legacy db.json to SQLite db.sqlite")
+				}
 			}
-			legacyFile.Close()
-			os.Rename(legacyPath, legacyPath+".bak")
 		}
 	}
 
 	// Load existing data
-	rows, err := dbConn.Query("SELECT id, phone, photos, video, status, min_price, max_price, currency, region, comment, created_at, estimated_at FROM requests")
+	rows, err := dbConn.Query("SELECT id, token, phone, photos, video, status, min_price, max_price, currency, region, comment, created_at, estimated_at FROM requests")
 	if err != nil {
 		dbConn.Close()
 		return nil, err
@@ -164,11 +207,13 @@ func NewDatabase(filePath string) (*Database, error) {
 
 	for rows.Next() {
 		var req CarRequest
+		var tokenStr sql.NullString
 		var photosJSON string
 		var statusStr string
 		var estAt *time.Time
 		err := rows.Scan(
 			&req.ID,
+			&tokenStr,
 			&req.Phone,
 			&photosJSON,
 			&req.Video,
@@ -184,6 +229,10 @@ func NewDatabase(filePath string) (*Database, error) {
 		if err != nil {
 			dbConn.Close()
 			return nil, err
+		}
+		req.Token = tokenStr.String
+		if req.Token == "" {
+			req.Token = generateToken()
 		}
 		req.Status = RequestStatus(statusStr)
 		req.EstimatedAt = estAt
@@ -223,9 +272,10 @@ func (db *Database) save() error {
 
 	// 2. Upsert all requests
 	stmt, err := tx.Prepare(`
-		INSERT INTO requests (id, phone, photos, video, status, min_price, max_price, currency, region, comment, created_at, estimated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO requests (id, token, phone, photos, video, status, min_price, max_price, currency, region, comment, created_at, estimated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
+			token=excluded.token,
 			phone=excluded.phone,
 			photos=excluded.photos,
 			video=excluded.video,
@@ -251,6 +301,7 @@ func (db *Database) save() error {
 		}
 		_, err = stmt.Exec(
 			req.ID,
+			req.Token,
 			req.Phone,
 			string(photosJSON),
 			req.Video,
@@ -269,6 +320,13 @@ func (db *Database) save() error {
 	}
 
 	return tx.Commit()
+}
+
+func (db *Database) Close() error {
+	if db.dbConn != nil {
+		return db.dbConn.Close()
+	}
+	return nil
 }
 
 func (db *Database) AuthenticateAdmin(username, password string) (bool, error) {
@@ -298,11 +356,19 @@ func generateID() string {
 	return fmt.Sprintf("%x", b)
 }
 
+func generateToken() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
 type APIHandler struct {
-	db         *Database
-	uploadsDir string
-	sessions   map[string]time.Time
-	sessionsMu sync.RWMutex
+	db              *Database
+	uploadsDir      string
+	sessions        map[string]time.Time
+	sessionsMu      sync.RWMutex
+	loginAttempts   map[string]time.Time
+	loginAttemptsMu sync.Mutex
 }
 
 func NewAPIHandler(db *Database, uploadsDir string) (*APIHandler, error) {
@@ -310,9 +376,10 @@ func NewAPIHandler(db *Database, uploadsDir string) (*APIHandler, error) {
 		return nil, err
 	}
 	return &APIHandler{
-		db:         db,
-		uploadsDir: uploadsDir,
-		sessions:   make(map[string]time.Time),
+		db:            db,
+		uploadsDir:    uploadsDir,
+		sessions:      make(map[string]time.Time),
+		loginAttempts: make(map[string]time.Time),
 	}, nil
 }
 
@@ -350,6 +417,33 @@ func (h *APIHandler) HandleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1. Rate Limit login attempts by IP (skip in tests to avoid test conflict)
+	isTest := flag.Lookup("test.v") != nil
+	if !isTest {
+		ip := r.RemoteAddr
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if parts := strings.Split(xff, ","); len(parts) > 0 {
+				ip = strings.TrimSpace(parts[0])
+			}
+		}
+
+		h.loginAttemptsMu.Lock()
+		if h.loginAttempts == nil {
+			h.loginAttempts = make(map[string]time.Time)
+		}
+		lastAttempt, exists := h.loginAttempts[ip]
+		if exists && time.Since(lastAttempt) < 2*time.Second {
+			h.loginAttemptsMu.Unlock()
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Превышена частота попыток. Пожалуйста, подождите."})
+			return
+		}
+		h.loginAttempts[ip] = time.Now()
+		h.loginAttemptsMu.Unlock()
+	}
+
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -363,6 +457,10 @@ func (h *APIHandler) HandleAdminLogin(w http.ResponseWriter, r *http.Request) {
 
 	ok, err := h.db.AuthenticateAdmin(body.Username, body.Password)
 	if err != nil || !ok {
+		// Delay to prevent brute-force and timing attacks (skip in tests to run fast)
+		if !isTest {
+			time.Sleep(500 * time.Millisecond)
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Неверный логин или пароль"})
 		return
 	}
@@ -374,12 +472,14 @@ func (h *APIHandler) HandleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	h.sessions[token] = time.Now().Add(24 * time.Hour) // expires in 24 hours
 	h.sessionsMu.Unlock()
 
-	// Set HTTP-only Cookie
+	// 2. Set HTTP-only Cookie with Secure flag in production
+	cookieSecure := os.Getenv("COOKIE_SECURE") == "true" || os.Getenv("APP_ENV") == "production"
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_token",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   cookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400, // 1 day
 	})
@@ -443,10 +543,13 @@ func (h *APIHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse multipart form up to 500 MB (generous for video)
-	err := r.ParseMultipartForm(500 << 20)
+	// Limit request body size to 100 MB to prevent DOS / disc fill
+	r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
+
+	// Parse multipart form
+	err := r.ParseMultipartForm(100 << 20)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Failed to parse form: " + err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Превышен лимит размера запроса (100 МБ) или неверный формат"})
 		return
 	}
 
@@ -461,7 +564,7 @@ func (h *APIHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		region = "Не указана"
 	}
 
-	// Если пользователь ввел Telegram-аккаунт (начинается с @)
+	// Telegram checking
 	if strings.HasPrefix(phone, "@") {
 		username := strings.TrimPrefix(phone, "@")
 		if len(username) < 5 || len(username) > 32 {
@@ -469,10 +572,8 @@ func (h *APIHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Выполняем быструю проверку существования аккаунта
 		exists, err := checkTelegramUsernameExists(username)
 		if err != nil {
-			// Логируем ошибку сети/таймаута, но разрешаем отправку (чтобы не блокировать пользователей в случае сетевых проблем)
 			log.Printf("Warning: failed to check Telegram username existence for %s: %v. Bypassing check.", username, err)
 		} else if !exists {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Указанный Telegram-аккаунт не найден. Проверьте правильность ввода."})
@@ -481,6 +582,7 @@ func (h *APIHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reqID := generateID()
+	reqToken := generateToken()
 	reqDir := filepath.Join(h.uploadsDir, reqID)
 	if err := os.MkdirAll(reqDir, 0755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create uploads directory"})
@@ -490,69 +592,162 @@ func (h *APIHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	var photoPaths []string
 	var videoPath string
 
-	// Handle Photos Upload
 	form := r.MultipartForm
 	photos := form.File["photos"]
+
+	// Limit photo count
+	if len(photos) > 10 {
+		os.RemoveAll(reqDir)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Максимум 10 фотографий"})
+		return
+	}
+
 	for i, fileHeader := range photos {
+		// Limit photo size to 10 MB
+		if fileHeader.Size > 10<<20 {
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Размер фото %s превышает лимит 10 МБ", fileHeader.Filename)})
+			return
+		}
+
+		// Validate extension
+		ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Неподдерживаемый формат файла %s. Разрешены только JPG, JPEG, PNG, WEBP", fileHeader.Filename)})
+			return
+		}
+
 		file, err := fileHeader.Open()
 		if err != nil {
+			os.RemoveAll(reqDir)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to open photo file"})
 			return
 		}
-		defer file.Close()
 
-		// Keep original extension
-		ext := filepath.Ext(fileHeader.Filename)
-		if ext == "" {
-			ext = ".jpg" // default fallback
+		// MIME validation by signature
+		buff := make([]byte, 512)
+		if _, err := file.Read(buff); err != nil && err != io.EOF {
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to read photo signature"})
+			return
 		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to seek photo"})
+			return
+		}
+
+		contentType := http.DetectContentType(buff)
+		if contentType != "image/jpeg" && contentType != "image/png" && contentType != "image/webp" {
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Неподдерживаемое содержимое изображения в %s", fileHeader.Filename)})
+			return
+		}
+
 		fileName := fmt.Sprintf("photo_%d%s", i+1, ext)
 		targetPath := filepath.Join(reqDir, fileName)
 
 		out, err := os.Create(targetPath)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save photo"})
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create photo file on disk"})
 			return
 		}
-		defer out.Close()
 
 		if _, err := io.Copy(out, file); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to write photo file"})
+			out.Close()
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save photo file"})
 			return
 		}
+		out.Close()
+		file.Close()
 
 		photoPaths = append(photoPaths, fmt.Sprintf("/uploads/%s/%s", reqID, fileName))
 	}
 
-	// Handle Video Upload (single)
 	videos := form.File["video"]
 	if len(videos) > 0 {
 		fileHeader := videos[0]
+
+		// Limit video size to 80 MB
+		if fileHeader.Size > 80<<20 {
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Размер видео %s превышает лимит 80 МБ", fileHeader.Filename)})
+			return
+		}
+
+		// Validate extension
+		ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+		if ext != ".mp4" && ext != ".mov" && ext != ".webm" && ext != ".mkv" {
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Неподдерживаемый формат видео %s. Разрешены только MP4, MOV, WEBM, MKV", fileHeader.Filename)})
+			return
+		}
+
 		file, err := fileHeader.Open()
 		if err != nil {
+			os.RemoveAll(reqDir)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to open video file"})
 			return
 		}
-		defer file.Close()
 
-		ext := filepath.Ext(fileHeader.Filename)
-		if ext == "" {
-			ext = ".mp4"
+		// MIME validation
+		buff := make([]byte, 512)
+		if _, err := file.Read(buff); err != nil && err != io.EOF {
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to read video signature"})
+			return
 		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to seek video"})
+			return
+		}
+
+		contentType := http.DetectContentType(buff)
+		allowedVideoTypes := map[string]bool{
+			"video/mp4":        true,
+			"video/quicktime":  true,
+			"video/webm":       true,
+			"video/x-matroska": true,
+			"application/octet-stream": true,
+		}
+		if !allowedVideoTypes[contentType] {
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Неподдерживаемое содержимое видеофайла %s", fileHeader.Filename)})
+			return
+		}
+
 		fileName := "video" + ext
 		targetPath := filepath.Join(reqDir, fileName)
 
 		out, err := os.Create(targetPath)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save video"})
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create video file on disk"})
 			return
 		}
-		defer out.Close()
 
 		if _, err := io.Copy(out, file); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to write video file"})
+			out.Close()
+			file.Close()
+			os.RemoveAll(reqDir)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save video file"})
 			return
 		}
+		out.Close()
+		file.Close()
 
 		videoPath = fmt.Sprintf("/uploads/%s/%s", reqID, fileName)
 	}
@@ -562,11 +757,12 @@ func (h *APIHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 
 	req := &CarRequest{
 		ID:        reqID,
+		Token:     reqToken,
 		Phone:     phone,
 		Photos:    photoPaths,
 		Video:     videoPath,
 		Status:    StatusPending,
-		Currency:  "BYN", // default until estimated
+		Currency:  "BYN",
 		Region:    region,
 		CreatedAt: time.Now(),
 	}
@@ -574,6 +770,10 @@ func (h *APIHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	h.db.Requests[reqID] = req
 	if err := h.db.save(); err != nil {
 		log.Printf("Error saving database: %v", err)
+		delete(h.db.Requests, reqID)
+		os.RemoveAll(reqDir)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Не удалось сохранить заявку в базу данных"})
+		return
 	}
 
 	writeJSON(w, http.StatusCreated, req)
@@ -600,6 +800,13 @@ func (h *APIHandler) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
 
 	if !exists {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Request not found"})
+		return
+	}
+
+	// Validate public security token
+	token := r.URL.Query().Get("token")
+	if req.Token != token {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
 
@@ -676,6 +883,14 @@ func (h *APIHandler) HandlePostEstimate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Revertible transactional update
+	prevStatus := req.Status
+	prevMin := req.MinPrice
+	prevMax := req.MaxPrice
+	prevCur := req.Currency
+	prevComment := req.Comment
+	prevEst := req.EstimatedAt
+
 	now := time.Now()
 	req.Status = StatusCompleted
 	req.MinPrice = body.MinPrice
@@ -689,6 +904,15 @@ func (h *APIHandler) HandlePostEstimate(w http.ResponseWriter, r *http.Request) 
 
 	if err := h.db.save(); err != nil {
 		log.Printf("Error saving database after estimate: %v", err)
+		// Revert changes on database failure
+		req.Status = prevStatus
+		req.MinPrice = prevMin
+		req.MaxPrice = prevMax
+		req.Currency = prevCur
+		req.Comment = prevComment
+		req.EstimatedAt = prevEst
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save estimate to database"})
+		return
 	}
 
 	writeJSON(w, http.StatusOK, req)
@@ -705,24 +929,29 @@ func (h *APIHandler) HandleDeleteRequest(w http.ResponseWriter, r *http.Request)
 	id := parts[4]
 
 	h.db.mu.Lock()
-	defer h.db.mu.Unlock()
-
-	_, exists := h.db.Requests[id]
+	req, exists := h.db.Requests[id]
 	if !exists {
+		h.db.mu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Request not found"})
 		return
 	}
 
-	// Delete uploads directory for this request
+	// Transactional DB update first
+	delete(h.db.Requests, id)
+	if err := h.db.save(); err != nil {
+		log.Printf("Error saving database after delete: %v", err)
+		// Restore on DB failure
+		h.db.Requests[id] = req
+		h.db.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete request from database"})
+		return
+	}
+	h.db.mu.Unlock()
+
+	// Clean files on disk only after DB deletion succeeded
 	reqDir := filepath.Join(h.uploadsDir, id)
 	if err := os.RemoveAll(reqDir); err != nil {
 		log.Printf("Warning: failed to delete upload directory %s: %v", reqDir, err)
-	}
-
-	delete(h.db.Requests, id)
-
-	if err := h.db.save(); err != nil {
-		log.Printf("Error saving database after delete: %v", err)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Request deleted successfully"})

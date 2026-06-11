@@ -1,5 +1,12 @@
 # Compiled binaries
 server
+skolkozaavto
 
 # Media uploads
 uploads/
+
+# Databases and migrations
+data/*.json*
+data/*.sqlite*
+data/*.bak
+data/*.db*
