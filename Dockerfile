@@ -7,7 +7,7 @@ RUN apk add --no-cache git build-base
 WORKDIR /app
 
 # Copy dependency files
-COPY go.mod ./
+COPY go.mod go.sum ./
 
 # Copy source code
 COPY main.go ./

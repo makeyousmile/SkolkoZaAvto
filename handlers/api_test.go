@@ -17,7 +17,7 @@ func TestNewDatabase(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	dbPath := filepath.Join(tempDir, "db.json")
+	dbPath := filepath.Join(tempDir, "db.sqlite")
 
 	// Initialize new database
 	db, err := NewDatabase(dbPath)
@@ -68,7 +68,7 @@ func TestHandleAdminLoginLogout(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	dbPath := filepath.Join(tempDir, "db.json")
+	dbPath := filepath.Join(tempDir, "db.sqlite")
 	db, _ := NewDatabase(dbPath)
 	uploadsDir := filepath.Join(tempDir, "uploads")
 	h, _ := NewAPIHandler(db, uploadsDir)
@@ -127,7 +127,7 @@ func TestHandlePostEstimateAndGetStatus(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	dbPath := filepath.Join(tempDir, "db.json")
+	dbPath := filepath.Join(tempDir, "db.sqlite")
 	db, _ := NewDatabase(dbPath)
 	uploadsDir := filepath.Join(tempDir, "uploads")
 	h, _ := NewAPIHandler(db, uploadsDir)
@@ -186,7 +186,7 @@ func TestHandleDeleteRequest(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	dbPath := filepath.Join(tempDir, "db.json")
+	dbPath := filepath.Join(tempDir, "db.sqlite")
 	db, _ := NewDatabase(dbPath)
 	uploadsDir := filepath.Join(tempDir, "uploads")
 	h, _ := NewAPIHandler(db, uploadsDir)

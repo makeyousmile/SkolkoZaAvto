@@ -24,7 +24,7 @@ func main() {
 		log.Printf("Warning: failed to generate PWA icons: %v", err)
 	}
 
-	dbPath := "./data/db.json"
+	dbPath := "./data/db.sqlite"
 	uploadsDir := "./uploads"
 
 	// Initialize database

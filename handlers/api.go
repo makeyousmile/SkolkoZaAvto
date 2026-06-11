@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +13,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
+
 
 type RequestStatus string
 
@@ -39,49 +43,210 @@ type CarRequest struct {
 type Database struct {
 	mu       sync.RWMutex
 	filePath string
+	dbConn   *sql.DB
 	Requests map[string]*CarRequest `json:"requests"`
 }
 
 func NewDatabase(filePath string) (*Database, error) {
-	db := &Database{
-		filePath: filePath,
-		Requests: make(map[string]*CarRequest),
-	}
-
 	// Create directory if not exists
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
 
-	// Read existing data if exists
-	if _, err := os.Stat(filePath); err == nil {
-		file, err := os.Open(filePath)
+	dbConn, err := sql.Open("sqlite", filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create table if not exists
+	createTableSQL := `
+	CREATE TABLE IF NOT EXISTS requests (
+		id TEXT PRIMARY KEY,
+		phone TEXT,
+		photos TEXT,
+		video TEXT,
+		status TEXT,
+		min_price REAL,
+		max_price REAL,
+		currency TEXT,
+		region TEXT,
+		comment TEXT,
+		created_at DATETIME,
+		estimated_at DATETIME
+	);`
+	if _, err := dbConn.Exec(createTableSQL); err != nil {
+		dbConn.Close()
+		return nil, err
+	}
+
+	db := &Database{
+		filePath: filePath,
+		dbConn:   dbConn,
+		Requests: make(map[string]*CarRequest),
+	}
+
+	// Migrate legacy db.json if exists
+	legacyPath := filepath.Join(filepath.Dir(filePath), "db.json")
+	if _, err := os.Stat(legacyPath); err == nil {
+		legacyFile, err := os.Open(legacyPath)
+		if err == nil {
+			var legacyRequests map[string]*CarRequest
+			if err := json.NewDecoder(legacyFile).Decode(&legacyRequests); err == nil {
+				tx, err := dbConn.Begin()
+				if err == nil {
+					stmt, err := tx.Prepare(`
+						INSERT INTO requests (id, phone, photos, video, status, min_price, max_price, currency, region, comment, created_at, estimated_at)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+						ON CONFLICT(id) DO NOTHING
+					`)
+					if err == nil {
+						for _, req := range legacyRequests {
+							photosJSON, _ := json.Marshal(req.Photos)
+							var estAt interface{}
+							if req.EstimatedAt != nil {
+								estAt = *req.EstimatedAt
+							}
+							stmt.Exec(
+								req.ID,
+								req.Phone,
+								string(photosJSON),
+								req.Video,
+								string(req.Status),
+								req.MinPrice,
+								req.MaxPrice,
+								req.Currency,
+								req.Region,
+								req.Comment,
+								req.CreatedAt,
+								estAt,
+							)
+						}
+						stmt.Close()
+						tx.Commit()
+					}
+				}
+			}
+			legacyFile.Close()
+			os.Rename(legacyPath, legacyPath+".bak")
+		}
+	}
+
+	// Load existing data
+	rows, err := dbConn.Query("SELECT id, phone, photos, video, status, min_price, max_price, currency, region, comment, created_at, estimated_at FROM requests")
+	if err != nil {
+		dbConn.Close()
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var req CarRequest
+		var photosJSON string
+		var statusStr string
+		var estAt *time.Time
+		err := rows.Scan(
+			&req.ID,
+			&req.Phone,
+			&photosJSON,
+			&req.Video,
+			&statusStr,
+			&req.MinPrice,
+			&req.MaxPrice,
+			&req.Currency,
+			&req.Region,
+			&req.Comment,
+			&req.CreatedAt,
+			&estAt,
+		)
 		if err != nil {
+			dbConn.Close()
 			return nil, err
 		}
-		defer file.Close()
-
-		if err := json.NewDecoder(file).Decode(&db.Requests); err != nil {
-			// If file is empty or corrupted, we start fresh but log it
-			log.Printf("Warning: failed to decode database file, starting fresh: %v", err)
-			db.Requests = make(map[string]*CarRequest)
+		req.Status = RequestStatus(statusStr)
+		req.EstimatedAt = estAt
+		if err := json.Unmarshal([]byte(photosJSON), &req.Photos); err != nil {
+			req.Photos = []string{}
 		}
+		db.Requests[req.ID] = &req
 	}
 
 	return db, nil
 }
 
 func (db *Database) save() error {
-	file, err := os.Create(db.filePath)
+	tx, err := db.dbConn.Begin()
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer tx.Rollback()
 
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(db.Requests)
+	// 1. Delete rows not in the map
+	var placeholders []string
+	var args []interface{}
+	for id := range db.Requests {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	if len(placeholders) > 0 {
+		query := fmt.Sprintf("DELETE FROM requests WHERE id NOT IN (%s)", strings.Join(placeholders, ","))
+		if _, err := tx.Exec(query, args...); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.Exec("DELETE FROM requests"); err != nil {
+			return err
+		}
+	}
+
+	// 2. Upsert all requests
+	stmt, err := tx.Prepare(`
+		INSERT INTO requests (id, phone, photos, video, status, min_price, max_price, currency, region, comment, created_at, estimated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			phone=excluded.phone,
+			photos=excluded.photos,
+			video=excluded.video,
+			status=excluded.status,
+			min_price=excluded.min_price,
+			max_price=excluded.max_price,
+			currency=excluded.currency,
+			region=excluded.region,
+			comment=excluded.comment,
+			created_at=excluded.created_at,
+			estimated_at=excluded.estimated_at
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, req := range db.Requests {
+		photosJSON, _ := json.Marshal(req.Photos)
+		var estAt interface{}
+		if req.EstimatedAt != nil {
+			estAt = *req.EstimatedAt
+		}
+		_, err = stmt.Exec(
+			req.ID,
+			req.Phone,
+			string(photosJSON),
+			req.Video,
+			string(req.Status),
+			req.MinPrice,
+			req.MaxPrice,
+			req.Currency,
+			req.Region,
+			req.Comment,
+			req.CreatedAt,
+			estAt,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func generateID() string {
