@@ -251,7 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const card = document.createElement('div');
       card.className = `request-card ${selectedId === req.id ? 'active' : ''}`;
       
-      const timeStr = formatShortDate(new Date(req.createdAt));
+      const timeStr = formatShortDate(new Date(req.created_at));
       const photosCount = req.photos ? req.photos.length : 0;
       const hasVideo = req.video ? '🎥 Видео' : 'Нет видео';
 
@@ -315,7 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Created At
-    const fullDateStr = new Date(req.createdAt).toLocaleString('ru-RU', {
+    const fullDateStr = new Date(req.created_at).toLocaleString('ru-RU', {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
