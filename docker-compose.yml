@@ -16,8 +16,10 @@ services:
       - app-data:/app/data
       - ./uploads:/app/uploads
     environment:
-      - PORT=8080
-      - TZ=Europe/Minsk
+      - PORT=${PORT:-8080}
+      - TZ=${TZ:-Europe/Minsk}
+      - APP_ENV=${APP_ENV:-development}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-chaka}
     labels:
       # Reproxy Docker auto-discovery labels
       - "reproxy.server=*" # Accepts any domain (localhost, local IP, etc.) for flexible local testing
@@ -40,14 +42,9 @@ services:
       - DOCKER_ENABLED=true      # Enable auto-routing based on Docker labels
       - DOCKER_API_VERSION=1.40  # Set Docker client API version to match the host daemon
       - SSL_DIR=/srv/ssl         # Store certs in /srv/ssl
-      
-      # LOCAL DEVELOPMENT MODE (No SSL)
-      - SSL_TYPE=none
-      
-      # PRODUCTION MODE (Uncomment these when deploying to production with a real domain)
-      # - SSL_TYPE=auto
-      # - SSL_ACME_EMAIL=your-email@example.com
-      # - SSL_ACME_FQDN=yourdomain.by
+      - SSL_TYPE=${SSL_TYPE:-none}
+      - SSL_ACME_EMAIL=${SSL_ACME_EMAIL:-}
+      - SSL_ACME_FQDN=${SSL_ACME_FQDN:-}
     depends_on:
       - app
 
