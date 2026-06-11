@@ -2,7 +2,10 @@ module skolkozaavto
 
 go 1.22
 
-require modernc.org/sqlite v1.33.0
+require (
+	golang.org/x/crypto v0.24.0
+	modernc.org/sqlite v1.33.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

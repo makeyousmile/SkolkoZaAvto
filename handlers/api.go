@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
@@ -78,6 +79,27 @@ func NewDatabase(filePath string) (*Database, error) {
 	if _, err := dbConn.Exec(createTableSQL); err != nil {
 		dbConn.Close()
 		return nil, err
+	}
+
+	// Create users table if not exists
+	createUsersTableSQL := `
+	CREATE TABLE IF NOT EXISTS users (
+		username TEXT PRIMARY KEY,
+		password_hash TEXT
+	);`
+	if _, err := dbConn.Exec(createUsersTableSQL); err != nil {
+		dbConn.Close()
+		return nil, err
+	}
+
+	// Insert default admin if table is empty
+	var count int
+	err = dbConn.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err == nil && count == 0 {
+		hashed, err := bcrypt.GenerateFromPassword([]byte("chaka"), bcrypt.DefaultCost)
+		if err == nil {
+			_, _ = dbConn.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", "admin", string(hashed))
+		}
 	}
 
 	db := &Database{
@@ -249,6 +271,27 @@ func (db *Database) save() error {
 	return tx.Commit()
 }
 
+func (db *Database) AuthenticateAdmin(username, password string) (bool, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	var hash string
+	err := db.dbConn.QueryRow("SELECT password_hash FROM users WHERE username = ?", username).Scan(&hash)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	if err != nil {
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func generateID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
@@ -318,7 +361,8 @@ func (h *APIHandler) HandleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.Username != "admin" || body.Password != "chaka" {
+	ok, err := h.db.AuthenticateAdmin(body.Username, body.Password)
+	if err != nil || !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Неверный логин или пароль"})
 		return
 	}
